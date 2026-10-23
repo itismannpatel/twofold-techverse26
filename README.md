@@ -10,6 +10,20 @@ Built for **Topic #03 · Peer-to-Peer Skill Exchange**: a marketplace-style web 
 
 ---
 
+## Team
+
+Built together by **Team TV26-COD-8031** for the Promethia Coding Challenge. Every feature was pair-built and reviewed across the team; the roles below reflect primary ownership.
+
+| Member | Role |
+|---|---|
+| **Patel Mann Sanjay** | Team Lead & Full-Stack Integration — architecture, API ↔ frontend wiring, project docs |
+| **Rathod Bharatsinh Narsangbhai** | Backend & Database — SQLite schema, the 12-endpoint REST API, prepared-SQL query layer |
+| **Shah Jainam Kalpeshbhai** | Frontend & UI/UX — React pages, the reusable component library, design-token CSS system |
+| **Sadhu Aaditya Manishkumar** | Matching Engine & Scheduling — the 100-point scoring algorithm, iCalendar (`.ics`) export |
+| **Gohel Devang Prakashbhai** | Chat, Testing & QA — cross-tab chat sync, the 41-check automated smoke suite, docs |
+
+---
+
 ## Quick start
 
 ```bash
