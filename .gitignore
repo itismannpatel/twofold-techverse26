@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output and caches
+dist/
+dist-ssr/
+.vite/
+coverage/
+tmp/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# SQLite runtime database (keep schema.sql and seed.ts tracked)
+server/db/*.db
+server/db/*.db-wal
+server/db/*.db-shm
+server/db/*.db-journal

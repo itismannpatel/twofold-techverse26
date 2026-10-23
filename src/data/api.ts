@@ -1,0 +1,233 @@
+import type {
+  Database,
+  Message,
+  RatingSummary,
+  Review,
+  ReviewRole,
+  Session,
+  Skill,
+  User,
+} from './types'
+import {
+  getCurrentUserId,
+  getSnapshot,
+  patch,
+  post,
+  refresh,
+  setCurrentUserId,
+} from './store'
+import { uid } from '../lib/id'
+
+/**
+ * The application's data API — the single seam between the UI and storage.
+ *
+ * Reads are pure functions over the cached snapshot (sync, no loading states).
+ * Writes are HTTP calls that return the updated snapshot, so they resolve with
+ * the UI already consistent.
+ *
+ * Components never import `store.ts` directly and never see SQL. Swapping the
+ * transport again would mean editing this file and nothing else.
+ */
+
+/* ------------------------------------------------------------------ reads */
+
+export function listUsers(db: Database = getSnapshot()): User[] {
+  return db.users
+}
+
+export function getUser(id: string, db: Database = getSnapshot()): User | undefined {
+  return db.users.find((u) => u.id === id)
+}
+
+export function getUserByHandle(handle: string, db: Database = getSnapshot()): User | undefined {
+  return db.users.find((u) => u.handle.toLowerCase() === handle.toLowerCase())
+}
+
+export function getCurrentUser(db: Database = getSnapshot()): User | null {
+  const id = getCurrentUserId()
+  if (!id) return null
+  return db.users.find((u) => u.id === id) ?? null
+}
+
+export function listSkills(db: Database = getSnapshot()): Skill[] {
+  return db.skills
+}
+
+export function getSkill(id: string, db: Database = getSnapshot()): Skill | undefined {
+  return db.skills.find((s) => s.id === id)
+}
+
+export function listSessionsForUser(userId: string, db: Database = getSnapshot()): Session[] {
+  return db.sessions
+    .filter((s) => s.teacherId === userId || s.learnerId === userId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+export function getSession(id: string, db: Database = getSnapshot()): Session | undefined {
+  return db.sessions.find((s) => s.id === id)
+}
+
+export function listReviewsForUser(userId: string, db: Database = getSnapshot()): Review[] {
+  return db.reviews
+    .filter((r) => r.toUserId === userId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+export function ratingFor(userId: string, db: Database = getSnapshot()): RatingSummary {
+  const reviews = db.reviews.filter((r) => r.toUserId === userId)
+  if (reviews.length === 0) return { average: 0, count: 0 }
+  const total = reviews.reduce((sum, r) => sum + r.rating, 0)
+  return { average: Math.round((total / reviews.length) * 10) / 10, count: reviews.length }
+}
+
+export function hasReviewed(
+  sessionId: string,
+  fromUserId: string,
+  db: Database = getSnapshot(),
+): boolean {
+  return db.reviews.some((r) => r.sessionId === sessionId && r.fromUserId === fromUserId)
+}
+
+export interface Thread {
+  partnerId: string
+  lastMessage: Message
+  unreadCount: number
+}
+
+export function listThreads(userId: string, db: Database = getSnapshot()): Thread[] {
+  const byPartner = new Map<string, Message[]>()
+  for (const message of db.messages) {
+    if (message.fromUserId !== userId && message.toUserId !== userId) continue
+    const partnerId = message.fromUserId === userId ? message.toUserId : message.fromUserId
+    const list = byPartner.get(partnerId) ?? []
+    list.push(message)
+    byPartner.set(partnerId, list)
+  }
+
+  return Array.from(byPartner.entries())
+    .map(([partnerId, messages]) => {
+      const sorted = [...messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      const unreadCount = sorted.filter(
+        (m) => m.fromUserId === partnerId && !m.readBy.includes(userId),
+      ).length
+      return { partnerId, lastMessage: sorted[sorted.length - 1], unreadCount }
+    })
+    .sort((a, b) => b.lastMessage.createdAt.localeCompare(a.lastMessage.createdAt))
+}
+
+export function listMessages(
+  userId: string,
+  partnerId: string,
+  db: Database = getSnapshot(),
+): Message[] {
+  return db.messages
+    .filter(
+      (m) =>
+        (m.fromUserId === userId && m.toUserId === partnerId) ||
+        (m.fromUserId === partnerId && m.toUserId === userId),
+    )
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+export function unreadTotal(userId: string, db: Database = getSnapshot()): number {
+  return db.messages.filter((m) => m.toUserId === userId && !m.readBy.includes(userId)).length
+}
+
+/* ----------------------------------------------------------------- writes */
+
+export interface NewUserInput {
+  name: string
+  email: string
+  branch: string
+  year: string
+  bio: string
+}
+
+/**
+ * Creates the user server-side, then signs them in locally. We do not return
+ * the created record — the caller reads it back off the refreshed snapshot,
+ * which keeps a single source of truth.
+ */
+export async function createUser(input: NewUserInput): Promise<void> {
+  await post('/api/users', input)
+  // The id is generated by the server, so look it up by the unique email.
+  const created = getSnapshot().users.find(
+    (u) => u.email.toLowerCase() === input.email.trim().toLowerCase(),
+  )
+  if (created) setCurrentUserId(created.id)
+}
+
+export interface UserPatch {
+  name?: string
+  branch?: string
+  year?: string
+  bio?: string
+  format?: User['format']
+  availability?: string[]
+  teaches?: User['teaches']
+  wants?: User['wants']
+}
+
+export function updateUser(id: string, patch_: UserPatch): Promise<void> {
+  return patch(`/api/users/${id}`, patch_)
+}
+
+export interface NewSessionInput {
+  teacherId: string
+  learnerId: string
+  skillId: string
+  topic: string
+  proposedSlots: string[]
+  note?: string
+}
+
+export function requestSession(input: NewSessionInput): Promise<void> {
+  return post('/api/sessions', input)
+}
+
+export function acceptSession(id: string, slot: string): Promise<void> {
+  return post(`/api/sessions/${id}/accept`, { slot })
+}
+
+export function declineSession(id: string): Promise<void> {
+  return post(`/api/sessions/${id}/decline`)
+}
+
+export function cancelSession(id: string): Promise<void> {
+  return post(`/api/sessions/${id}/cancel`)
+}
+
+export function completeSession(id: string): Promise<void> {
+  return post(`/api/sessions/${id}/complete`)
+}
+
+export interface NewReviewInput {
+  sessionId: string
+  fromUserId: string
+  toUserId: string
+  rating: number
+  text: string
+  role: ReviewRole
+}
+
+export function addReview(input: NewReviewInput): Promise<void> {
+  return post('/api/reviews', {
+    ...input,
+    id: `r_${uid()}`,
+  })
+}
+
+export function sendMessage(fromUserId: string, toUserId: string, body: string): Promise<void> {
+  const trimmed = body.trim()
+  if (!trimmed) return Promise.resolve()
+  return post('/api/messages', { fromUserId, toUserId, body: trimmed, id: `m_${uid()}` })
+}
+
+export function markThreadRead(userId: string, partnerId: string): Promise<void> {
+  return post('/api/messages/read', { userId, partnerId })
+}
+
+/** Wipe the database and reload the seeded dataset. */
+export function resetDatabase(): Promise<void> {
+  return post('/api/reset').then(() => refresh())
+}
